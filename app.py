@@ -1136,11 +1136,11 @@ def main():
 
     # --- VIEW 4: SYSTEM VISUALIZATION ---
     elif selected_view == "🎥 VISUALIZATION":
-        st.markdown("## 🎥 SYSTEM VISUALIZATION")
+        st.markdown("<h1 style='text-align: center; color: #00FF00;'>📹 SYSTEM VISUALIZATION</h1>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
         # 1. Center the Visualization (Canvas)
-        col1, col2, col3 = st.columns([1, 4, 1])
+        col1, col2, col3 = st.columns([0.1, 15, 0.1])
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
             # Flowchart / Visualization
