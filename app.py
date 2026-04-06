@@ -12,6 +12,9 @@ from streamlit_lottie import st_lottie
 import streamlit.components.v1 as components
 import base64
 import pydeck as pdk
+import joblib
+import csv
+
 
 def get_img_as_base64(file_path):
     try:
@@ -38,6 +41,31 @@ LOTTIE_SCANNER = "https://lottie.host/5e28206d-7132-4914-bce2-66bb70dfd437/dBS7z
 LOTTIE_LOCK = "https://lottie.host/4b859942-5f65-4654-a039-4467384218a4/p7lJqC1qR6.json"
 
 
+
+@st.cache_resource
+def load_ml_models():
+    try:
+        # Assuming run directory has access
+        scaler = joblib.load('Sentinel_Zero_Scaler.pkl')
+        model = joblib.load('Isolation_Forest.pkl')
+        return scaler, model
+    except Exception as e:
+        return None, None
+
+scaler, model = load_ml_models()
+
+def get_last_line(filepath):
+    try:
+        with open(filepath, 'rb') as f:
+            try:
+                f.seek(-2, os.SEEK_END)
+                while f.read(1) != b'\n':
+                    f.seek(-2, os.SEEK_CUR)
+            except OSError:
+                f.seek(0)
+            return f.readline().decode()
+    except Exception:
+        return None
 
 @st.cache_data
 def load_lottie_url(url: str):
@@ -815,7 +843,7 @@ def authenticated_app(authenticator):
 
             st.markdown("### NETWORK TELEMETRY")
             m1, m2 = st.columns(2)
-            m1.metric("PACKETS / SEC", f"{random.randint(120, 450)}" if st.session_state.monitoring else "0")
+            m1.metric("PACKETS / SEC", f"{st.session_state.get('packets_per_sec', 0)}" if st.session_state.monitoring else "0")
             m2.metric("BANDWIDTH", f"{random.uniform(0.5, 2.5):.1f} GB/s" if st.session_state.monitoring else "0 GB/s")
 
         st.markdown("---")
@@ -853,68 +881,104 @@ def authenticated_app(authenticator):
         # Monitoring Logic
         if st.session_state.monitoring:
             timestamp = datetime.now().strftime("%H:%M:%S")
-            st.session_state.scanned_count += 1
+            csv_path = "/home/kali/live_traffic.csv"
+            
+            # --- LIVE ML READ ---
+            last_line = None
+            if os.path.exists(csv_path):
+                last_line = get_last_line(csv_path)
+            
+            is_new_line = False
+            if last_line:
+                if 'last_csv_line' not in st.session_state or st.session_state.last_csv_line != last_line:
+                    st.session_state.last_csv_line = last_line
+                    is_new_line = True
 
-            if random.random() < 0.15: # Threat
-                forensics = generate_forensics()
-                threat_id = len(st.session_state.quarantine_list) + 1
-                st.session_state.quarantine_list.append({'id': threat_id, 'time': timestamp, 'forensics': forensics})
-                st.session_state.threat_history.append(forensics)
+            if is_new_line and last_line:
+                try:
+                    # Parse CSV: frame.time_epoch, ip.src, ip.dst, ip.proto, frame.len
+                    parts = [p.strip() for p in last_line.split(',')]
+                    if len(parts) >= 5:
+                        time_epoch, src_ip, dst_ip, proto_str, frame_len = parts[:5]
+                        
+                        st.session_state.scanned_count += 1
+                        
+                        # Feature mapping
+                        features = np.zeros(41)
+                        try:
+                            proto_val = float(proto_str)
+                        except ValueError:
+                            proto_val = 6.0 if proto_str.upper() == "TCP" else (17.0 if proto_str.upper() == "UDP" else 0.0)
+                        
+                        features[1] = proto_val
+                        features[4] = float(frame_len)
+                        
+                        # Real-Time Inference
+                        if scaler and model:
+                            features_scaled = scaler.transform([features])
+                            prediction = model.predict(features_scaled)[0]
+                            is_threat = (prediction == -1)
+                        else:
+                            is_threat = False
+                        
+                        if is_threat: # Threat
+                            forensics = generate_forensics()
+                            # Override mock IPs with LIVE IP
+                            forensics['src_ip'] = src_ip
+                            forensics['dest_ip'] = dst_ip
+                            threat_id = len(st.session_state.quarantine_list) + 1
+                            st.session_state.quarantine_list.append({'id': threat_id, 'time': timestamp, 'forensics': forensics})
+                            st.session_state.threat_history.append(forensics)
+                            
+                            # 1. Play Sound (If enabled)
+                            if 'last_threat_time' not in st.session_state or (time.time() - st.session_state.last_threat_time > 2):
+                                play_sound("alert")
+                                st.session_state.last_threat_time = time.time()
+
+                            st.session_state.last_alert_count = len(st.session_state.quarantine_list)
+
+                            # 2. Agentic AI Logic (The Fix)
+                            pid = random.randint(1000, 9999)
+                            
+                            if honeypot_active:
+                                status_text = "SANDBOXED 🍯"
+                                log_msg = f"> [AUTO] Threat detected. Redirecting to Sandbox (PID {pid})... | Latency: 0.02s"
+                                st.toast(f"🪤 Threat diverted to Honeypot!", icon="🛡️")
+                                st.session_state.safe_logs.append({'time': timestamp, 'ip': src_ip, 'status': status_text, 'protocol': "TRAP"})
+                            else:
+                                status_text = "BLOCKED 🔴"
+                                log_msg = f"> [AUTO-HEAL] High Risk Identity. KILLING PROCESS PID {pid}. Blocking IP... SUCCESS."
+                                st.toast(f"🚨 Threat Blocked!", icon="⚠️")
+                                st.session_state.safe_logs.append({'time': timestamp, 'ip': src_ip, 'status': status_text, 'protocol': "DROP"})
+
+                            # 3. Append to Logs
+                            if 'agent_logs' not in st.session_state:
+                                st.session_state.agent_logs = []
+                            st.session_state.agent_logs.append(log_msg)
+                            if len(st.session_state.agent_logs) > 5:
+                                st.session_state.agent_logs.pop(0)
+
+                        else: # Safe
+                            st.session_state.safe_logs.append({'time': timestamp, 'ip': src_ip, 'status': 'SAFE ✅', 'protocol': proto_str})
+                except Exception as e:
+                    pass
+            
+            # --- End Live ML Read ---
+            
+            # Calculate polling-based Packets/Sec 
+            if 'last_poll_time' not in st.session_state:
+                st.session_state.last_poll_time = time.time()
+                st.session_state.poll_packets = 0
+                st.session_state.packets_per_sec = 0
+            
+            if is_new_line:
+                st.session_state.poll_packets += 1
                 
-                # 1. Play Sound (If enabled)
-                if 'last_threat_time' not in st.session_state or (time.time() - st.session_state.last_threat_time > 2):
-                    play_sound("alert")
-                    st.session_state.last_threat_time = time.time()
-
-                st.session_state.last_alert_count = len(st.session_state.quarantine_list)
-
-                # 2. Agentic AI Logic (The Fix)
-                pid = random.randint(1000, 9999)
-                
-                if honeypot_active:
-                    # Honeypot Logic
-                    status_text = "SANDBOXED 🍯"
-                    log_msg = f"> [AUTO] Threat detected. Redirecting to Sandbox (PID {pid})... | Latency: 0.02s"
-                    st.toast(f"🪤 Threat diverted to Honeypot!", icon="🛡️")
-                    
-                    # Log to terminal
-                    st.session_state.safe_logs.append({
-                        'time': timestamp,
-                        'ip': forensics['src_ip'],
-                        'status': status_text,
-                        'protocol': "TRAP"
-                    })
-                else:
-                    # Blocking Logic
-                    status_text = "BLOCKED 🔴"
-                    log_msg = f"> [AUTO-HEAL] High Risk Identity. KILLING PROCESS PID {pid}. Blocking IP... SUCCESS."
-                    st.toast(f"🚨 Threat Blocked!", icon="⚠️")
-                    
-                    # Log to terminal
-                    st.session_state.safe_logs.append({
-                        'time': timestamp,
-                        'ip': forensics['src_ip'],
-                        'status': status_text,
-                        'protocol': "DROP"
-                    })
-
-                # 3. Append to Logs
-                if 'agent_logs' not in st.session_state:
-                    st.session_state.agent_logs = []
-                
-                st.session_state.agent_logs.append(log_msg)
-                # Keep only last 5 logs
-                if len(st.session_state.agent_logs) > 5:
-                    st.session_state.agent_logs.pop(0)
-            else: # Safe
-                src_ip = f"{random.randint(10, 192)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}"
-                proto = random.choice(["TCP", "UDP", "HTTP/2", "TLSv1.3"])
-                st.session_state.safe_logs.append({
-                    'time': timestamp,
-                    'ip': src_ip,
-                    'status': 'SAFE ✅',
-                    'protocol': proto
-                })
+            current_time = time.time()
+            if current_time - st.session_state.last_poll_time >= 1.0:
+                st.session_state.packets_per_sec = st.session_state.poll_packets
+                st.session_state.poll_packets = 0
+                st.session_state.last_poll_time = current_time
 
             time.sleep(0.05) # Faster scan speed
             
