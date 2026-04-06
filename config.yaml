@@ -1,0 +1,13 @@
+credentials:
+  usernames:
+    admin:
+      email: admin@sentinelzero.com
+      name: "System Admin"
+      password: '$2b$12$vLMlVu0o0279QMa6Jxf.ceUaGFDZ3ucSRo0Fkzxv7al44tb3aXIii'
+cookie:
+  expiry_days: 30
+  key: "sentinel_secret_key"
+  name: "sentinel_cookie"
+preauthorized:
+  emails:
+    - admin@sentinelzero.com

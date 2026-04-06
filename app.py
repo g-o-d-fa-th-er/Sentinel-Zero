@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import yaml
+import streamlit_authenticator as stauth
 import numpy as np
 import requests
 import time
@@ -62,129 +64,131 @@ def play_sound(sound_type):
         # We use a unique key based on time to force the sound to play even if triggered twice
         st.audio(sound_urls[sound_type], format="audio/mp3", autoplay=True)
 
-# --- CYBERPUNK CSS ---
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
-    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-
-    /* GLOBAL THEME */
-    .stApp {
-        background-color: #000000;
-        color: #00ff41;
-        font-family: 'Orbitron', sans-serif;
-    }
-
-    /* CRT SCANLINE EFFECT */
-    .stApp::before {
-        content: " ";
-        display: block;
-        position: fixed;
-        top: 0;
-        left: 0;
-        bottom: 0;
-        right: 0;
-        background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
-        z-index: 9999;
-        background-size: 100% 2px;
-        pointer-events: none;
-        animation: scanline 10s linear infinite;
-    }
-
-    @keyframes scanline {
-        0% { background-position: 0 0; }
-        100% { background-position: 0 100%; }
-    }
-
-    /* SIDEBAR */
-    [data-testid="stSidebar"] {
-        background-color: #050505;
-        border-right: 1px solid #00ff41;
-    }
-
-    /* NEON BUTTONS */
-    .stButton>button {
-        background: #000;
-        color: #00ff41 !important;
-        border: 1px solid #00ff41 !important;
-        border-radius: 0px !important;
-        font-family: 'Orbitron', sans-serif;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        transition: all 0.3s;
-        box-shadow: 0 0 5px #00ff41;
-    }
-    .stButton>button:hover {
-        background: #00ff41 !important;
-        color: #000 !important;
-        box-shadow: 0 0 20px #00ff41;
-    }
-
-    /* TOGGLES */
-    .stToggle {
-        font-family: 'Share Tech Mono', monospace;
-        color: #00ff41;
-    }
-
-    /* RADIO BUTTONS (NAVIGATION) */
-    .stRadio > label {
-        color: #00ff41 !important;
-        font-family: 'Orbitron', sans-serif;
-        font-weight: bold;
-    }
-
-    /* TERMINAL LOG */
-    .terminal-log {
-        background-color: #050505;
-        border: 1px solid #333;
-        padding: 15px;
-        font-family: 'Share Tech Mono', monospace;
-        height: 400px;
-        overflow-y: auto;
-        color: #00ff41;
-        font-size: 14px;
-        box-shadow: inset 0 0 20px rgba(0, 255, 65, 0.1);
-    }
-    .log-entry {
-        margin-bottom: 5px;
-        border-bottom: 1px solid #111;
-        padding-bottom: 2px;
-    }
-    .log-time { color: #888; margin-right: 10px; }
-    .log-ip { color: #00aaff; margin-right: 10px; }
-    .log-status { color: #00ff41; font-weight: bold; }
-    .log-encrypted { color: #ff003c; font-family: 'Courier New', monospace; letter-spacing: 3px; }
-
-    /* BOOT SCREEN */
-    .boot-container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        height: 100vh;
-        text-align: center;
-    }
-    .boot-title {
-        font-size: 5em;
-        font-weight: 900;
-        color: #00ff41;
-        text-shadow: 0 0 30px #00ff41;
-        margin-bottom: 10px;
-        letter-spacing: 5px;
-    }
-    .boot-subtitle {
-        font-family: 'Share Tech Mono', monospace;
-        color: #888;
-        font-size: 1.5em;
-        margin-bottom: 40px;
-    }
-
-    /* CUSTOM HEADER STYLE (Visible but unobtrusive) */
-    header[data-testid="stHeader"] {
-        background: transparent;
-    }
-</style>
-""", unsafe_allow_html=True)
+# --- CYBERPUNK CSS (Wrapped) ---
+def load_css():
+    # --- CYBERPUNK CSS ---
+    st.markdown("""
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+    
+        /* GLOBAL THEME */
+        .stApp {
+            background-color: #000000;
+            color: #00ff41;
+            font-family: 'Orbitron', sans-serif;
+        }
+    
+        /* CRT SCANLINE EFFECT */
+        .stApp::before {
+            content: " ";
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+            z-index: 9999;
+            background-size: 100% 2px;
+            pointer-events: none;
+            animation: scanline 10s linear infinite;
+        }
+    
+        @keyframes scanline {
+            0% { background-position: 0 0; }
+            100% { background-position: 0 100%; }
+        }
+    
+        /* SIDEBAR */
+        [data-testid="stSidebar"] {
+            background-color: #050505;
+            border-right: 1px solid #00ff41;
+        }
+    
+        /* NEON BUTTONS */
+        .stButton>button {
+            background: #000;
+            color: #00ff41 !important;
+            border: 1px solid #00ff41 !important;
+            border-radius: 0px !important;
+            font-family: 'Orbitron', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            transition: all 0.3s;
+            box-shadow: 0 0 5px #00ff41;
+        }
+        .stButton>button:hover {
+            background: #00ff41 !important;
+            color: #000 !important;
+            box-shadow: 0 0 20px #00ff41;
+        }
+    
+        /* TOGGLES */
+        .stToggle {
+            font-family: 'Share Tech Mono', monospace;
+            color: #00ff41;
+        }
+    
+        /* RADIO BUTTONS (NAVIGATION) */
+        .stRadio > label {
+            color: #00ff41 !important;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: bold;
+        }
+    
+        /* TERMINAL LOG */
+        .terminal-log {
+            background-color: #050505;
+            border: 1px solid #333;
+            padding: 15px;
+            font-family: 'Share Tech Mono', monospace;
+            height: 400px;
+            overflow-y: auto;
+            color: #00ff41;
+            font-size: 14px;
+            box-shadow: inset 0 0 20px rgba(0, 255, 65, 0.1);
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            border-bottom: 1px solid #111;
+            padding-bottom: 2px;
+        }
+        .log-time { color: #888; margin-right: 10px; }
+        .log-ip { color: #00aaff; margin-right: 10px; }
+        .log-status { color: #00ff41; font-weight: bold; }
+        .log-encrypted { color: #ff003c; font-family: 'Courier New', monospace; letter-spacing: 3px; }
+    
+        /* BOOT SCREEN */
+        .boot-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            text-align: center;
+        }
+        .boot-title {
+            font-size: 5em;
+            font-weight: 900;
+            color: #00ff41;
+            text-shadow: 0 0 30px #00ff41;
+            margin-bottom: 10px;
+            letter-spacing: 5px;
+        }
+        .boot-subtitle {
+            font-family: 'Share Tech Mono', monospace;
+            color: #888;
+            font-size: 1.5em;
+            margin-bottom: 40px;
+        }
+    
+        /* CUSTOM HEADER STYLE (Visible but unobtrusive) */
+        header[data-testid="stHeader"] {
+            background: transparent;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
 # --- FORENSICS GENERATOR ---
 def generate_forensics():
@@ -446,7 +450,8 @@ if 'encryption_enabled' not in st.session_state: st.session_state.encryption_ena
 if 'system_power' not in st.session_state: st.session_state.system_power = True
 if 'agent_logs' not in st.session_state: st.session_state.agent_logs = []
 
-def main():
+def authenticated_app(authenticator):
+    load_css()
 
     # === PHASE 1: CINEMATIC SATELLITE BOOT ===
     if not st.session_state.boot_complete:
@@ -642,6 +647,9 @@ def main():
         if st.session_state.system_power:
             st.session_state.encryption_enabled = st.toggle("ENCRYPTION PROTOCOL", value=st.session_state.encryption_enabled)
             
+        st.markdown("<br>", unsafe_allow_html=True)
+        authenticator.logout("Logout", "sidebar")
+        
         # HONEYPOT TOGGLE
         st.markdown("<br>", unsafe_allow_html=True)
         honeypot_active = st.sidebar.checkbox("🛡️ Activate Deception Layer (Honeypot)", value=False, help="Reroutes attackers to a sandboxed environment instead of blocking them.")
@@ -1183,6 +1191,46 @@ def main():
         </marquee>
     </div>
     """, unsafe_allow_html=True)
+
+
+def main():
+    # 1. GLOBAL STYLING (Applies to Login Page too)
+    load_css()
+
+    with open("config.yaml") as file:
+        config = yaml.load(file, Loader=yaml.SafeLoader)
+
+    authenticator = stauth.Authenticate(
+        config["credentials"],
+        config["cookie"]["name"],
+        config["cookie"]["key"],
+        config["cookie"]["expiry_days"]
+    )
+
+    # 2. BRANDING & TRANSFORMATION
+    if not st.session_state.get("authentication_status"):
+        # Logo & Title
+        logo_b64 = get_img_as_base64("logo_icon.png")
+        if logo_b64:
+            st.markdown(f"""
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 20px;">
+                    <img src="data:image/png;base64,{logo_b64}" style="width: 150px; border-radius: 50%; border: 2px solid #00ff41; box-shadow: 0 0 20px rgba(0, 255, 65, 0.5);">
+                    <h1 style="color: #00ff41; font-family: 'Orbitron', sans-serif; letter-spacing: 5px; text-shadow: 0 0 10px #00ff41; margin-top: 20px;">SENTINEL ZERO</h1>
+                    <p style="color: #888; font-family: 'Share Tech Mono', monospace; letter-spacing: 2px;">ACCESS CONTROL GATEWAY</p>
+                </div>
+            """, unsafe_allow_html=True)
+
+    # 3. CENTERED LOGIN BOX
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        authenticator.login()
+
+    if st.session_state["authentication_status"]:
+        authenticated_app(authenticator)
+    elif st.session_state["authentication_status"] is False:
+        st.error("Username/password is incorrect")
+    elif st.session_state["authentication_status"] is None:
+        st.warning("Please enter your username and password")
 
 if __name__ == "__main__":
     main()
