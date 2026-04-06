@@ -54,18 +54,13 @@ def load_ml_models():
 
 scaler, model = load_ml_models()
 
-def get_last_line(filepath):
+def get_last_10_lines(filepath):
     try:
-        with open(filepath, 'rb') as f:
-            try:
-                f.seek(-2, os.SEEK_END)
-                while f.read(1) != b'\n':
-                    f.seek(-2, os.SEEK_CUR)
-            except OSError:
-                f.seek(0)
-            return f.readline().decode()
+        import collections
+        with open(filepath, 'r') as f:
+            return list(collections.deque(f, 10))
     except Exception:
-        return None
+        return []
 
 @st.cache_data
 def load_lottie_url(url: str):
@@ -777,8 +772,9 @@ def authenticated_app(authenticator):
             risk_mitigation = int((st.session_state.blocked_count / total_threats) * 100) if total_threats > 0 else 100
             
             p_threats = len(st.session_state.quarantine_list)
-            threat_level = "STABLE" if p_threats < 5 else "ELEVATED"
-            level_delta = "- Stable" if p_threats < 5 else "+ High Risk"
+            dynamic_threat = st.session_state.get('dynamic_threat_level', 'STABLE')
+            threat_level = "CRITICAL" if dynamic_threat == "CRITICAL" else ("ELEVATED" if p_threats >= 5 else "STABLE")
+            level_delta = "- Stable" if threat_level == "STABLE" else "+ High Risk"
             mitigation_delta = "+2.4%" # Mock trend
             
             k1, k2, k3, k4 = st.columns(4)
@@ -860,7 +856,10 @@ def authenticated_app(authenticator):
                 display_ip = log['ip']
                 display_proto = log['protocol']
 
-                if st.session_state.encryption_enabled and random.random() < 0.3:
+                if 'ANOMALY' in log['status']:
+                    style_class = "log-encrypted"
+                    display_proto = "THREAT"
+                elif st.session_state.encryption_enabled and random.random() < 0.3:
                     display_ip = "".join([random.choice("XJ9#2@") for _ in range(12)])
                     display_proto = "ENCRYPTED"
                     style_class = "log-encrypted"
@@ -884,84 +883,87 @@ def authenticated_app(authenticator):
             csv_path = "/home/kali/live_traffic.csv"
             
             # --- LIVE ML READ ---
-            last_line = None
+            new_lines = []
             if os.path.exists(csv_path):
-                last_line = get_last_line(csv_path)
-            
-            is_new_line = False
-            if last_line:
-                if 'last_csv_line' not in st.session_state or st.session_state.last_csv_line != last_line:
-                    st.session_state.last_csv_line = last_line
-                    is_new_line = True
+                lines = get_last_10_lines(csv_path)
+                if 'processed_line_hashes' not in st.session_state:
+                    st.session_state.processed_line_hashes = set()
+                
+                for line in lines:
+                    line_hash = hash(line)
+                    if line_hash not in st.session_state.processed_line_hashes:
+                        new_lines.append(line)
+                        st.session_state.processed_line_hashes.add(line_hash)
+                
+                if len(st.session_state.processed_line_hashes) > 1000:
+                    st.session_state.processed_line_hashes = set(list(st.session_state.processed_line_hashes)[-500:])
 
-            if is_new_line and last_line:
-                try:
-                    # Parse CSV: frame.time_epoch, ip.src, ip.dst, ip.proto, frame.len
-                    parts = [p.strip() for p in last_line.split(',')]
-                    if len(parts) >= 5:
-                        time_epoch, src_ip, dst_ip, proto_str, frame_len = parts[:5]
-                        
-                        st.session_state.scanned_count += 1
-                        
-                        # Feature mapping
-                        features = np.zeros(41)
-                        try:
-                            proto_val = float(proto_str)
-                        except ValueError:
-                            proto_val = 6.0 if proto_str.upper() == "TCP" else (17.0 if proto_str.upper() == "UDP" else 0.0)
-                        
-                        features[1] = proto_val
-                        features[4] = float(frame_len)
-                        
-                        # Real-Time Inference
-                        if scaler and model:
-                            features_scaled = scaler.transform([features])
-                            prediction = model.predict(features_scaled)[0]
-                            is_threat = (prediction == -1)
-                        else:
-                            is_threat = False
-                        
-                        if is_threat: # Threat
-                            forensics = generate_forensics()
-                            # Override mock IPs with LIVE IP
-                            forensics['src_ip'] = src_ip
-                            forensics['dest_ip'] = dst_ip
-                            threat_id = len(st.session_state.quarantine_list) + 1
-                            st.session_state.quarantine_list.append({'id': threat_id, 'time': timestamp, 'forensics': forensics})
-                            st.session_state.threat_history.append(forensics)
+            if new_lines:
+                current_threat_level = "STABLE"
+                for last_line in new_lines:
+                    try:
+                        parts = [p.strip() for p in last_line.split(',')]
+                        if len(parts) >= 5:
+                            time_epoch, src_ip, dst_ip, proto_str, frame_len = parts[:5]
                             
-                            # 1. Play Sound (If enabled)
-                            if 'last_threat_time' not in st.session_state or (time.time() - st.session_state.last_threat_time > 2):
-                                play_sound("alert")
-                                st.session_state.last_threat_time = time.time()
-
-                            st.session_state.last_alert_count = len(st.session_state.quarantine_list)
-
-                            # 2. Agentic AI Logic (The Fix)
-                            pid = random.randint(1000, 9999)
+                            st.session_state.scanned_count += 1
                             
-                            if honeypot_active:
-                                status_text = "SANDBOXED 🍯"
-                                log_msg = f"> [AUTO] Threat detected. Redirecting to Sandbox (PID {pid})... | Latency: 0.02s"
-                                st.toast(f"🪤 Threat diverted to Honeypot!", icon="🛡️")
-                                st.session_state.safe_logs.append({'time': timestamp, 'ip': src_ip, 'status': status_text, 'protocol': "TRAP"})
+                            # Feature mapping -> 41 columns. One-hot encoded protocol, frame.len -> src_bytes
+                            features = np.zeros(41)
+                            proto_upper = str(proto_str).upper()
+                            if proto_upper == "TCP" or proto_upper == "6":
+                                features[1] = 1.0
+                            elif proto_upper == "UDP" or proto_upper == "17":
+                                features[2] = 1.0
+                            elif proto_upper == "ICMP" or proto_upper == "1":
+                                features[3] = 1.0
                             else:
-                                status_text = "BLOCKED 🔴"
+                                features[1] = 1.0 # fallback
+                            
+                            features[4] = float(frame_len)
+                            
+                            if scaler and model:
+                                features_scaled = scaler.transform([features])
+                                prediction = model.predict(features_scaled)[0]
+                            else:
+                                prediction = 1
+                            
+                            if prediction == -1: # Threat
+                                current_threat_level = "CRITICAL"
+                                st.session_state.dynamic_threat_level = "CRITICAL"
+                                
+                                forensics = generate_forensics()
+                                forensics['src_ip'] = src_ip
+                                forensics['dest_ip'] = dst_ip
+                                threat_id = len(st.session_state.quarantine_list) + 1
+                                st.session_state.quarantine_list.append({'id': threat_id, 'time': timestamp, 'forensics': forensics})
+                                st.session_state.threat_history.append(forensics)
+                                
+                                if 'last_threat_time' not in st.session_state or (time.time() - st.session_state.last_threat_time > 2):
+                                    play_sound("alert")
+                                    st.session_state.last_threat_time = time.time()
+
+                                st.session_state.last_alert_count = len(st.session_state.quarantine_list)
+
+                                pid = random.randint(1000, 9999)
+                                status_text = "ANOMALY 🔴"
                                 log_msg = f"> [AUTO-HEAL] High Risk Identity. KILLING PROCESS PID {pid}. Blocking IP... SUCCESS."
                                 st.toast(f"🚨 Threat Blocked!", icon="⚠️")
-                                st.session_state.safe_logs.append({'time': timestamp, 'ip': src_ip, 'status': status_text, 'protocol': "DROP"})
+                                st.session_state.safe_logs.append({'time': timestamp, 'ip': src_ip, 'status': status_text, 'protocol': "THREAT"})
 
-                            # 3. Append to Logs
-                            if 'agent_logs' not in st.session_state:
-                                st.session_state.agent_logs = []
-                            st.session_state.agent_logs.append(log_msg)
-                            if len(st.session_state.agent_logs) > 5:
-                                st.session_state.agent_logs.pop(0)
+                                if 'agent_logs' not in st.session_state:
+                                    st.session_state.agent_logs = []
+                                st.session_state.agent_logs.append(log_msg)
+                                if len(st.session_state.agent_logs) > 5:
+                                    st.session_state.agent_logs.pop(0)
 
-                        else: # Safe
-                            st.session_state.safe_logs.append({'time': timestamp, 'ip': src_ip, 'status': 'SAFE ✅', 'protocol': proto_str})
-                except Exception as e:
-                    pass
+                            else: # Safe (prediction == 1)
+                                st.session_state.safe_logs.append({'time': timestamp, 'ip': src_ip, 'status': 'SAFE ✅', 'protocol': proto_str})
+                    except Exception as e:
+                        pass
+                
+                if current_threat_level != "CRITICAL":
+                    st.session_state.dynamic_threat_level = "STABLE"
             
             # --- End Live ML Read ---
             
@@ -971,8 +973,7 @@ def authenticated_app(authenticator):
                 st.session_state.poll_packets = 0
                 st.session_state.packets_per_sec = 0
             
-            if is_new_line:
-                st.session_state.poll_packets += 1
+            st.session_state.poll_packets += len(new_lines)
                 
             current_time = time.time()
             if current_time - st.session_state.last_poll_time >= 1.0:
