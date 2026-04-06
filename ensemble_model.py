@@ -71,3 +71,49 @@ class ThreatDetector:
             self.training_data = pd.concat([self.training_data, packet_df], ignore_index=True)
 
         self.train(self.training_data)
+
+if __name__ == "__main__":
+    import pandas as pd
+    from sklearn.preprocessing import MinMaxScaler, LabelEncoder
+    import joblib
+    import os
+
+    print("[*] Loading KDDTrain+ Data...")
+    columns = [
+        "duration", "protocol_type", "service", "flag", "src_bytes", "dst_bytes",
+        "land", "wrong_fragment", "urgent", "hot", "num_failed_logins",
+        "logged_in", "num_compromised", "root_shell", "su_attempted", "num_root",
+        "num_file_creations", "num_shells", "num_access_files", "num_outbound_cmds",
+        "is_host_login", "is_guest_login", "count", "srv_count", "serror_rate",
+        "srv_serror_rate", "rerror_rate", "srv_rerror_rate", "same_srv_rate",
+        "diff_srv_rate", "srv_diff_host_rate", "dst_host_count", "dst_host_srv_count",
+        "dst_host_same_srv_rate", "dst_host_diff_srv_rate", "dst_host_same_src_port_rate",
+        "dst_host_srv_diff_host_rate", "dst_host_serror_rate", "dst_host_srv_serror_rate",
+        "dst_host_rerror_rate", "dst_host_srv_rerror_rate", "label", "difficulty"
+    ]
+    data_path = os.path.join("data", "KDDTrain+.txt")
+    if not os.path.exists(data_path):
+        print(f"[!] Data not found at {data_path}. Please download the NSL-KDD dataset into the data folder.")
+    else:
+        df = pd.read_csv(data_path, names=columns)
+        
+        # Keep exactly 41 features
+        X = df.drop(columns=['label', 'difficulty'])
+        
+        print("[*] Label Encoding Categorical Features...")
+        for col in ['protocol_type', 'service', 'flag']:
+            le = LabelEncoder()
+            X[col] = le.fit_transform(X[col])
+            
+        print("[*] Scaling Features...")
+        scaler = MinMaxScaler()
+        X_scaled = scaler.fit_transform(X)
+        
+        print("[*] Training Isolation Forest on 41 Features...")
+        iso_forest = IsolationForest(contamination=0.05, random_state=42, n_jobs=-1)
+        iso_forest.fit(X_scaled)
+        
+        print("[*] Exporting Models into the Root Directory...")
+        joblib.dump(scaler, 'Sentinel_Zero_Scaler.pkl')
+        joblib.dump(iso_forest, 'Isolation_Forest.pkl')
+        print("[+] Export Complete: Sentinel_Zero_Scaler.pkl, Isolation_Forest.pkl")
