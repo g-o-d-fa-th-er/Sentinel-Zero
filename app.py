@@ -476,7 +476,10 @@ if 'agent_logs' not in st.session_state: st.session_state.agent_logs = []
 
 def authenticated_app(authenticator):
     load_css()
-    st_autorefresh(interval=2000, key="datarefresh")
+    
+    # Auto-refresh only when monitoring to avoid unnecessary reloads
+    if st.session_state.get('monitoring', False):
+        st_autorefresh(interval=1000, key="datarefresh")
 
     # === PHASE 1: CINEMATIC SATELLITE BOOT ===
     if not st.session_state.boot_complete:
@@ -1001,7 +1004,7 @@ def authenticated_app(authenticator):
                     log_text = "\n".join(st.session_state.agent_logs[-5:])
                     st.code(log_text, language="diff") # 'diff' highlights lines starting with + or - or similar, looks cool green/red
             
-            st.rerun()
+            # st.rerun() removed to let st_autorefresh seamlessly handle the 1000ms loop
 
     # --- VIEW 2: QUARANTINE BAY ---
     elif selected_view == "💀 QUARANTINE BAY":
