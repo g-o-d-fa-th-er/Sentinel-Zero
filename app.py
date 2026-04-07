@@ -933,7 +933,7 @@ def authenticated_app(authenticator):
                             else:
                                 prediction = 1
                             
-                            if packet_rate > 20:
+                            if packet_rate > 5:
                                 prediction = -1
                             
                             if prediction == -1: # Threat
