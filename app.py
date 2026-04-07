@@ -14,6 +14,7 @@ import base64
 import pydeck as pdk
 import joblib
 import csv
+from streamlit_autorefresh import st_autorefresh
 
 
 def get_img_as_base64(file_path):
@@ -475,6 +476,7 @@ if 'agent_logs' not in st.session_state: st.session_state.agent_logs = []
 
 def authenticated_app(authenticator):
     load_css()
+    st_autorefresh(interval=2000, key="datarefresh")
 
     # === PHASE 1: CINEMATIC SATELLITE BOOT ===
     if not st.session_state.boot_complete:

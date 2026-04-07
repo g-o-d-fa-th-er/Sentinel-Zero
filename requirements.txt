@@ -11,3 +11,4 @@ graphviz
 PyYAML
 streamlit-authenticator
 pydeck
+streamlit-autorefresh
