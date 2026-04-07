@@ -869,13 +869,13 @@ def authenticated_app(authenticator):
                     style_class = "log-ip"
 
                 log_html += f"""
-                <div class="log-entry">
-                    <span class="log-time">[{log['time']}]</span>
-                    <span class="{style_class}">SRC: {display_ip}</span>
-                    <span class="log-status">{log['status']}</span>
-                    <span style="color: #666; float: right;">{display_proto}</span>
-                </div>
-                """
+<div class="log-entry">
+    <span class="log-time">[{log['time']}]</span>
+    <span class="{style_class}">SRC: {display_ip}</span>
+    <span class="log-status">{log['status']}</span>
+    <span style="color: #666; float: right;">{display_proto}</span>
+</div>
+"""
         log_html += '</div>'
         st.markdown(log_html, unsafe_allow_html=True)
 
