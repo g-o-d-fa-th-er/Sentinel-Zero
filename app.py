@@ -882,24 +882,35 @@ def authenticated_app(authenticator):
             timestamp = datetime.now().strftime("%H:%M:%S")
             csv_path = "/home/kali/live_traffic.csv"
             
+            # --- MANAGE 2-SECOND ROLLING WINDOW GLOBALLY ---
+            if 'packet_history' not in st.session_state:
+                st.session_state.packet_history = []
+            current_t = time.time()
+            st.session_state.packet_history = [t for t in st.session_state.packet_history if current_t - t <= 2.0]
+            packet_rate = len(st.session_state.packet_history)
+            
+            # Decay threat level if traffic normalizes
+            if packet_rate <= 5:
+                st.session_state.dynamic_threat_level = "STABLE"
+
             # --- LIVE ML READ ---
             new_lines = []
             if os.path.exists(csv_path):
                 lines = get_last_10_lines(csv_path)
-                if 'processed_line_hashes' not in st.session_state:
-                    st.session_state.processed_line_hashes = set()
+                if 'processed_line_hashes' not in st.session_state or not isinstance(st.session_state.processed_line_hashes, list):
+                    st.session_state.processed_line_hashes = []
                 
                 for line in lines:
                     line_hash = hash(line)
                     if line_hash not in st.session_state.processed_line_hashes:
                         new_lines.append(line)
-                        st.session_state.processed_line_hashes.add(line_hash)
+                        st.session_state.processed_line_hashes.append(line_hash)
                 
                 if len(st.session_state.processed_line_hashes) > 1000:
-                    st.session_state.processed_line_hashes = set(list(st.session_state.processed_line_hashes)[-500:])
+                    st.session_state.processed_line_hashes = st.session_state.processed_line_hashes[-500:]
 
             if new_lines:
-                current_threat_level = "STABLE"
+                current_threat_level = st.session_state.get('dynamic_threat_level', 'STABLE')
                 for last_line in new_lines:
                     try:
                         parts = [p.strip() for p in last_line.split(',')]
@@ -908,11 +919,7 @@ def authenticated_app(authenticator):
                             
                             st.session_state.scanned_count += 1
                             
-                            if 'packet_history' not in st.session_state:
-                                st.session_state.packet_history = []
-                            current_t = time.time()
                             st.session_state.packet_history.append(current_t)
-                            st.session_state.packet_history = [t for t in st.session_state.packet_history if current_t - t <= 2.0]
                             packet_rate = len(st.session_state.packet_history)
                             
                             # Feature mapping -> 41 columns. One-hot encoded protocol, frame.len -> src_bytes
@@ -972,9 +979,6 @@ def authenticated_app(authenticator):
                                 st.session_state.safe_logs.append({'time': timestamp, 'ip': src_ip, 'status': 'SAFE ✅', 'protocol': proto_str})
                     except Exception as e:
                         pass
-                
-                if current_threat_level != "CRITICAL":
-                    st.session_state.dynamic_threat_level = "STABLE"
             
             # --- End Live ML Read ---
             
