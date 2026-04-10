@@ -467,13 +467,24 @@ if 'safe_logs' not in st.session_state: st.session_state.safe_logs = []
 if 'quarantine_list' not in st.session_state: st.session_state.quarantine_list = []
 if 'blocked_count' not in st.session_state: st.session_state.blocked_count = 0
 if 'false_positives' not in st.session_state: st.session_state.false_positives = 0
-if 'scanned_count' not in st.session_state: st.session_state.scanned_count = 0
+if 'total_packets' not in st.session_state: st.session_state.total_packets = 0
+if 'total_threats' not in st.session_state: st.session_state.total_threats = 0
 if 'last_alert_count' not in st.session_state: st.session_state.last_alert_count = 0
 if 'threat_history' not in st.session_state: st.session_state.threat_history = []
 if 'encryption_enabled' not in st.session_state: st.session_state.encryption_enabled = True
 if 'system_power' not in st.session_state: st.session_state.system_power = True
 if 'agent_logs' not in st.session_state: st.session_state.agent_logs = []
 if 'anomaly_ips' not in st.session_state: st.session_state.anomaly_ips = []
+if 'traffic_volume_history' not in st.session_state: 
+    st.session_state.traffic_volume_history = pd.DataFrame(np.zeros((20, 3)), columns=['ICMP', 'TCP', 'UDP'])
+if 'attack_vectors' not in st.session_state:
+    st.session_state.attack_vectors = {
+        "Reconnaissance / Port Scan": 0,
+        "Denial of Service (DoS)": 0,
+        "Malware / C2": 0,
+        "Data Exfiltration": 0,
+        "Exploit / Web Attack": 0
+    }
 
 def authenticated_app(authenticator):
     load_css()
@@ -705,8 +716,8 @@ def authenticated_app(authenticator):
              st.sidebar.info("AWAITING DATA FOR EXPORT...")
 
         st.markdown("---")
-        st.metric("📦 PACKETS", st.session_state.scanned_count)
-        st.metric("🚨 THREATS", len(st.session_state.quarantine_list))
+        st.metric("📦 PACKETS", st.session_state.total_packets)
+        st.metric("🚨 THREATS", st.session_state.total_threats)
         st.caption("SECURE CONNECTION")
 
     if not st.session_state.system_power:
@@ -835,8 +846,17 @@ def authenticated_app(authenticator):
                 if st.button("⏹ FLUSH LOGS", key="btn_flush", use_container_width=True):
                     st.session_state.monitoring = False
                     st.session_state.safe_logs = []
-                    st.session_state.scanned_count = 0
+                    st.session_state.total_packets = 0
+                    st.session_state.total_threats = 0
                     st.session_state.threat_history = []
+                    st.session_state.traffic_volume_history = pd.DataFrame(np.zeros((20, 3)), columns=['ICMP', 'TCP', 'UDP'])
+                    st.session_state.attack_vectors = {
+                        "Reconnaissance / Port Scan": 0,
+                        "Denial of Service (DoS)": 0,
+                        "Malware / C2": 0,
+                        "Data Exfiltration": 0,
+                        "Exploit / Web Attack": 0
+                    }
 
             st.markdown("### NETWORK TELEMETRY")
             m1, m2 = st.columns(2)
@@ -896,6 +916,10 @@ def authenticated_app(authenticator):
 
             # --- LIVE ML READ ---
             new_lines = []
+            current_icmp = 0
+            current_tcp = 0
+            current_udp = 0
+            
             if os.path.exists(csv_path):
                 lines = get_last_10_lines(csv_path)
                 if 'processed_line_hashes' not in st.session_state or not isinstance(st.session_state.processed_line_hashes, list):
@@ -918,7 +942,7 @@ def authenticated_app(authenticator):
                         if len(parts) >= 5:
                             time_epoch, src_ip, dst_ip, proto_str, frame_len = parts[:5]
                             
-                            st.session_state.scanned_count += 1
+                            st.session_state.total_packets += 1
                             
                             st.session_state.packet_history.append(current_t)
                             packet_rate = len(st.session_state.packet_history)
@@ -929,12 +953,16 @@ def authenticated_app(authenticator):
                             proto_upper = str(proto_str).upper()
                             if proto_upper == "TCP" or proto_upper == "6":
                                 features[1] = 1.0
+                                current_tcp += 1
                             elif proto_upper == "UDP" or proto_upper == "17":
                                 features[2] = 1.0
+                                current_udp += 1
                             elif proto_upper == "ICMP" or proto_upper == "1":
                                 features[3] = 1.0
+                                current_icmp += 1
                             else:
                                 features[1] = 1.0 # fallback
+                                current_tcp += 1
                             
                             features[4] = float(frame_len)
                             
@@ -950,6 +978,16 @@ def authenticated_app(authenticator):
                             if prediction == -1: # Threat
                                 current_threat_level = "CRITICAL"
                                 st.session_state.dynamic_threat_level = "CRITICAL"
+                                st.session_state.total_threats += 1
+                                
+                                if packet_rate >= 10:
+                                    st.session_state.attack_vectors["Denial of Service (DoS)"] += 1
+                                elif packet_rate >= 5:
+                                    st.session_state.attack_vectors["Reconnaissance / Port Scan"] += 1
+                                elif dst_ip.endswith("105") and proto_upper in ["TCP", "6"]:
+                                    st.session_state.attack_vectors["Exploit / Web Attack"] += 1
+                                else:
+                                    st.session_state.attack_vectors["Malware / C2"] += 1
                                 
                                 forensics = generate_forensics()
                                 forensics['src_ip'] = src_ip
@@ -981,6 +1019,11 @@ def authenticated_app(authenticator):
                                 st.session_state.safe_logs.append({'time': timestamp, 'ip': src_ip, 'status': 'SAFE ✅', 'protocol': proto_str})
                     except Exception as e:
                         pass
+            
+            new_row = pd.DataFrame({'ICMP': [current_icmp], 'TCP': [current_tcp], 'UDP': [current_udp]})
+            st.session_state.traffic_volume_history = pd.concat([st.session_state.traffic_volume_history, new_row], ignore_index=True)
+            if len(st.session_state.traffic_volume_history) > 20:
+                st.session_state.traffic_volume_history = st.session_state.traffic_volume_history.iloc[-20:]
             
             # --- End Live ML Read ---
             
@@ -1141,8 +1184,8 @@ def authenticated_app(authenticator):
 
         # 2. Section 2: Live Metrics
         c1, c2, c3 = st.columns(3)
-        c1.metric("PACKETS SCANNED", "1.2M+", "+5%")
-        c2.metric("THREATS BLOCKED", len(st.session_state.threat_history), "Active")
+        c1.metric("PACKETS SCANNED", f"{st.session_state.total_packets:,}", "+5%")
+        c2.metric("THREATS BLOCKED", f"{st.session_state.total_threats:,}", "Active")
         c3.metric("SYSTEM INTEGRITY", "99.9%", "Stable")
 
         st.markdown("---")
@@ -1150,20 +1193,17 @@ def authenticated_app(authenticator):
         # 3. Section 3: Threat Analytics (The Graphs)
         st.markdown("### 📊 TRAFFIC ANALYSIS")
         
-        # Mock Data for Charts
-        chart_data_lines = pd.DataFrame(
-            np.random.randn(20, 3),
-            columns=['HTTP', 'TCP', 'UDP']
-        )
+        # Dynamic Data for Charts
+        chart_data_lines = st.session_state.traffic_volume_history.copy()
         
-        chart_data_bar = pd.DataFrame({
-            "Attack Type": ["SQLi", "Brute Force", "Malware", "DDoS", "XSS"],
-            "Count": [45, 120, 30, 80, 15]
-        }).set_index("Attack Type")
+        chart_data_bar = pd.DataFrame(
+            list(st.session_state.attack_vectors.items()), 
+            columns=["Attack Type", "Count"]
+        ).set_index("Attack Type")
 
         g1, g2 = st.columns(2)
         with g1:
-            st.caption("TRAFFIC VOLUME (24H)")
+            st.caption("TRAFFIC VOLUME (LIVE)")
             st.line_chart(chart_data_lines)
         with g2:
             st.caption("ATTACK VECTORS")
