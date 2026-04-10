@@ -473,6 +473,7 @@ if 'threat_history' not in st.session_state: st.session_state.threat_history = [
 if 'encryption_enabled' not in st.session_state: st.session_state.encryption_enabled = True
 if 'system_power' not in st.session_state: st.session_state.system_power = True
 if 'agent_logs' not in st.session_state: st.session_state.agent_logs = []
+if 'anomaly_ips' not in st.session_state: st.session_state.anomaly_ips = []
 
 def authenticated_app(authenticator):
     load_css()
@@ -956,6 +957,7 @@ def authenticated_app(authenticator):
                                 threat_id = len(st.session_state.quarantine_list) + 1
                                 st.session_state.quarantine_list.append({'id': threat_id, 'time': timestamp, 'forensics': forensics})
                                 st.session_state.threat_history.append(forensics)
+                                st.session_state.anomaly_ips.append({'ip': src_ip, 'timestamp': timestamp})
                                 
                                 if 'last_threat_time' not in st.session_state or (time.time() - st.session_state.last_threat_time > 2):
                                     play_sound("alert")
@@ -1094,6 +1096,7 @@ def authenticated_app(authenticator):
     elif selected_view == "📊 INTELLIGENCE":
         # 1. Section 1: Global Telemetry (The Map)
         st.markdown("### 🌍 GLOBAL THREAT ORIGINS")
+        st.caption("Global Telemetry: Simulation Mode (Locally routed IPs cannot be geolocated)")
         
         # Enhanced Mock Data for 3D Map
         map_data = pd.DataFrame({
@@ -1185,30 +1188,17 @@ def authenticated_app(authenticator):
         # 5. Section 5: Active Firewall Policies (Self-Healing)
         st.markdown("### 🛡️ ACTIVE FIREWALL POLICIES (AUTO-GENERATED)")
         
-        if st.session_state.threat_history:
-            # Generate Mock Rules based on history
+        if st.session_state.anomaly_ips:
             firewall_rules = []
-            for i, threat in enumerate(st.session_state.threat_history[-5:]): # Show last 5
+            for i, anomaly in enumerate(st.session_state.anomaly_ips[-5:]): # Show last 5
                 
-                # Retrieve the unique risk score for this threat (The "Brain")
-                risk_factors = threat.get('risk_factors', {"Default": 50})
-                risk_score = int(sum(risk_factors.values()) / len(risk_factors))
-                
-                # Determine NSL-KDD Reason (The "Why")
-                if risk_score > 80:
-                    reason = "CRITICAL: Anomaly detected in Service/Flag features (NSL-KDD)"
-                elif risk_score > 60:
-                    reason = "HIGH: Traffic volume exceeds cluster centroid threshold"
-                else:
-                    reason = "WARN: Unknown signature match in packet header"
-
                 rule = {
                     "RULE ID": f"SZ-AUTO-{1000+i}",
-                    "TARGET IP": threat['src_ip'],
-                    "RISK SCORE": f"{risk_score}%", # The Link
-                    "REASONING": reason,
-                    "TIMESTAMP": threat.get('timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-                    "GENERATED POLICY": f"REJECT TCP FROM {threat['src_ip']}"
+                    "TARGET IP": anomaly['ip'],
+                    "RISK SCORE": "CRITICAL",
+                    "REASONING": "CRITICAL: High-Velocity Anomaly Detected by Isolation Forest",
+                    "TIMESTAMP": anomaly['timestamp'],
+                    "GENERATED POLICY": f"REJECT TCP FROM {anomaly['ip']}"
                 }
                 firewall_rules.append(rule)
             
