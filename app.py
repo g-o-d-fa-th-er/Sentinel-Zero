@@ -1184,8 +1184,8 @@ def authenticated_app(authenticator):
 
         # 2. Section 2: Live Metrics
         c1, c2, c3 = st.columns(3)
-        c1.metric("PACKETS SCANNED", f"{st.session_state.total_packets:,}", "+5%")
-        c2.metric("THREATS BLOCKED", f"{st.session_state.total_threats:,}", "Active")
+        c1.metric("PACKETS SCANNED", f"{st.session_state.total_packets:,}")
+        c2.metric("THREATS BLOCKED", f"{st.session_state.total_threats:,}")
         c3.metric("SYSTEM INTEGRITY", "99.9%", "Stable")
 
         st.markdown("---")
@@ -1214,14 +1214,19 @@ def authenticated_app(authenticator):
         # 4. Section 4: Adversary Attribution (The Table)
         st.markdown("### 🕵️ DETECTED ADVERSARY GROUPS")
         
-        adversary_data = pd.DataFrame([
-            {"Group Name": "APT-28 (Fancy Bear)", "Origin": "Russia", "Risk Level": "CRITICAL", "Status": "TRACKING 🟡"},
-            {"Group Name": "Lazarus Group", "Origin": "North Korea", "Risk Level": "HIGH", "Status": "BLOCKED 🔴"},
-            {"Group Name": "Anonymous", "Origin": "Global", "Risk Level": "MODERATE", "Status": "MONITORING 🟢"},
-            {"Group Name": "Equation Group", "Origin": "Unknown", "Risk Level": "CRITICAL", "Status": "ANALYZING 🔵"},
-        ])
-        
-        st.table(adversary_data)
+        if st.session_state.anomaly_ips:
+            dynamic_adversaries = []
+            for anomaly in st.session_state.anomaly_ips[-5:]:
+                dynamic_adversaries.append({
+                    "Group Name": f"Unidentified Scanner ({anomaly['ip']})",
+                    "Origin": "Local Network",
+                    "Risk Level": "CRITICAL",
+                    "Status": "BLOCKED 🔴"
+                })
+            adversary_data = pd.DataFrame(dynamic_adversaries)
+            st.table(adversary_data)
+        else:
+            st.info("NO ACTIVE ADVERSARY GROUPS DETECTED.")
         
         st.markdown("---")
 
